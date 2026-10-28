@@ -38,12 +38,13 @@ export const RequestDialog = ({ profiles, installed, existingNames, defaultEmail
     defaultEmail: string,
     dialogResult: DialogResult<RequestDialogResult | "add-credentials" | null>,
 }) => {
-    const usable = profiles.filter(p => installed.some(i => i.name === p.plugin));
+    /* missing plugins are installed before the request runs */
+    const missing = (p: CredentialsProfile) => !installed.some(i => i.name === p.plugin);
 
     const [domainText, setDomainText] = useState("");
     const [certName, setCertName] = useState("");
-    const [method, setMethod] = useState<"dns" | "standalone" | "webroot">(usable.length ? "dns" : "standalone");
-    const [profileId, setProfileId] = useState(usable[0]?.id ?? "");
+    const [method, setMethod] = useState<"dns" | "standalone" | "webroot">(profiles.length ? "dns" : "standalone");
+    const [profileId, setProfileId] = useState(profiles[0]?.id ?? "");
     const [propagation, setPropagation] = useState("");
     const [webroot, setWebroot] = useState("/var/www/html");
     const [port, setPort] = useState("");
@@ -54,7 +55,7 @@ export const RequestDialog = ({ profiles, installed, existingNames, defaultEmail
 
     const domains = splitDomains(domainText);
     const name = certName.trim() || defaultCertName(domains);
-    const profile = usable.find(p => p.id === profileId);
+    const profile = profiles.find(p => p.id === profileId);
 
     const badDomains = domains.filter(d => !isValidDomain(d));
     const errors: Record<string, string | null> = {
@@ -146,15 +147,17 @@ export const RequestDialog = ({ profiles, installed, existingNames, defaultEmail
                     {method === "dns" &&
                         <FormSection>
                             <FormGroup label={_("DNS credentials")} fieldId="request-profile" isRequired>
-                                {usable.length > 0
+                                {profiles.length > 0
                                     ? <FormSelect id="request-profile" value={profileId}
                                                   onChange={(_e, v) => setProfileId(v)}>
-                                        {usable.map(p =>
+                                        {profiles.map(p =>
                                             <FormSelectOption key={p.id} value={p.id}
-                                                              label={`${p.label} (${findProvider(p.plugin).label})`}
+                                                              label={missing(p)
+                                                                  ? cockpit.format(_("$0 ($1, plugin will be installed)"), p.label, findProvider(p.plugin).label)
+                                                                  : `${p.label} (${findProvider(p.plugin).label})`}
                                             />)}
                                     </FormSelect>
-                                    : <Alert variant="warning" isInline isPlain title={_("No usable DNS credentials")}>
+                                    : <Alert variant="warning" isInline isPlain title={_("No DNS credentials")}>
                                         <Button variant="link" isInline
                                                 onClick={() => dialogResult.resolve("add-credentials")}>
                                             {_("Add DNS credentials")}

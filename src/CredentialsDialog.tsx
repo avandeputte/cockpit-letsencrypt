@@ -33,11 +33,10 @@ export function availableProviders(installed: PluginInfo[]): Provider[] {
     return [...PROVIDERS, ...extra];
 }
 
-export const CredentialsDialog = ({ profile, profiles, installed, onInstall, dialogResult }: {
+export const CredentialsDialog = ({ profile, profiles, installed, dialogResult }: {
     profile: CredentialsProfile | null,
     profiles: CredentialsProfile[],
     installed: PluginInfo[],
-    onInstall: (provider: Provider) => Promise<void>,
     dialogResult: DialogResult<CredentialsProfile | null>,
 }) => {
     const providers = availableProviders(installed);
@@ -114,14 +113,8 @@ export const CredentialsDialog = ({ profile, profiles, installed, onInstall, dia
     };
 
     const installHelp = !isInstalled(provider) && (
-        <Alert variant="warning" isInline
-               title={cockpit.format(_("The certbot plugin $0 is not installed"), provider.plugin)}>
-            {provider.package
-                ? <Button variant="link" isInline onClick={() => onInstall(provider)}>
-                    {cockpit.format(_("Install $0"), provider.package)}
-                </Button>
-                : provider.pip && <p>{cockpit.format(_("Install it with: $0"), `pip install ${provider.pip}`)}</p>}
-        </Alert>
+        <Alert variant="info" isInline isPlain
+               title={cockpit.format(_("The certbot plugin $0 will be installed when you save."), provider.pip ?? provider.plugin)} />
     );
 
     const known = providers.filter(p => !isGeneric(p));

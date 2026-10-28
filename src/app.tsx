@@ -221,16 +221,27 @@ const RenewalTimerAlert = ({ timer, reload }: { timer: TimerState | null, reload
     );
 };
 
+/* Installs the certbot plugin of a provider if it is missing. Resolves to
+ * true when the plugin is available afterwards. */
+async function ensurePlugin(Dialogs: DialogsType, provider: Provider, installed: PluginInfo[]): Promise<boolean> {
+    if (installed.some(i => i.name === provider.plugin))
+        return true;
+    const name = provider.package ?? provider.pip ?? provider.plugin;
+    return await Dialogs.run(CommandDialog, {
+        title: cockpit.format(_("Installing certbot plugin $0"), name),
+        args: backend.installPluginArgs(provider),
+        command: cockpit.format(_("install $0"), name),
+        autoClose: true,
+    });
+}
+
 async function addCredentials(Dialogs: DialogsType, profiles: CredentialsProfile[],
     installed: PluginInfo[], reload: () => void, profile: CredentialsProfile | null = null) {
-    let installedNow = false;
-    const onInstall = async (provider: Provider) => {
-        /* the install dialog is a separate modal that stacks above ours */
-        await install_dialog(provider.package).then(() => { installedNow = true }, () => {});
-    };
-    await Dialogs.run(CredentialsDialog, { profile, profiles, installed, onInstall });
-    if (installedNow)
+    const saved = await Dialogs.run(CredentialsDialog, { profile, profiles, installed });
+    if (saved) {
+        await ensurePlugin(Dialogs, findProvider(saved.plugin), installed);
         reload();
+    }
 }
 
 async function offerRestart(Dialogs: DialogsType) {
@@ -275,6 +286,11 @@ const CertificatesCard = ({ state, profiles, settings, version, reload }: {
             return addCredentials(Dialogs, profiles, installed, reload);
         if (!result)
             return;
+        const challenge = result.request.challenge;
+        if (challenge.type === "dns" && !await ensurePlugin(Dialogs, challenge.provider, installed)) {
+            reload();
+            return;
+        }
         if (result.rememberEmail && result.request.email)
             await backend.saveSettings({ email: result.request.email }).catch(ex => console.warn(ex));
         await run(cockpit.format(_("Requesting certificate $0"), result.request.certName),
@@ -543,6 +559,12 @@ const CredentialsCard = ({ state, profiles, reload }: {
             <DropdownItem key="edit" onClick={() => addCredentials(Dialogs, profiles, installed, reload, p)}>
                 {_("Edit")}
             </DropdownItem>,
+            ...pluginOk
+                ? []
+                : [<DropdownItem key="install"
+                                 onClick={() => ensurePlugin(Dialogs, findProvider(p.plugin), installed).then(reload)}>
+                    {_("Install plugin")}
+                </DropdownItem>],
             <DropdownItem key="delete" isDanger onClick={() => remove(p)}>
                 {_("Delete")}
             </DropdownItem>,
