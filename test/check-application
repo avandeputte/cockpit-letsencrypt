@@ -1,0 +1,98 @@
+#!/usr/bin/python3 -cimport os, sys; os.execv(os.path.dirname(sys.argv[1]) + "/common/pywrap", sys.argv)
+
+# Run this with --help to see available options for tracing and debugging
+# See https://github.com/cockpit-project/cockpit/blob/main/test/common/testlib.py
+# "class Browser" and "class MachineCase" for the available API.
+
+import testlib
+
+FAKE_LINEAGE = """
+set -eu
+B=/etc/letsencrypt
+N=test.example.com
+mkdir -p $B/archive/$N $B/live/$N $B/renewal
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 60 \
+    -keyout $B/archive/$N/privkey1.pem -out $B/archive/$N/cert1.pem \
+    -subj "/CN=$N" -addext "subjectAltName=DNS:$N,DNS:*.$N" 2>/dev/null
+cp $B/archive/$N/cert1.pem $B/archive/$N/chain1.pem
+cat $B/archive/$N/cert1.pem $B/archive/$N/chain1.pem > $B/archive/$N/fullchain1.pem
+for f in cert chain fullchain privkey; do ln -sf ../../archive/$N/${f}1.pem $B/live/$N/$f.pem; done
+cat > $B/renewal/$N.conf <<CONF
+version = 2.0.0
+archive_dir = $B/archive/$N
+cert = $B/live/$N/cert.pem
+privkey = $B/live/$N/privkey.pem
+chain = $B/live/$N/chain.pem
+fullchain = $B/live/$N/fullchain.pem
+
+[renewalparams]
+authenticator = standalone
+server = https://acme-v02.api.letsencrypt.org/directory
+CONF
+"""
+
+
+@testlib.nondestructive
+class TestApplication(testlib.MachineCase):
+    def testBasic(self):
+        b = self.browser
+        m = self.machine
+
+        if m.execute("command -v certbot || true").strip() == "":
+            self.login_and_go("/letsencrypt")
+            b.wait_in_text(".pf-v6-c-empty-state", "certbot is not installed")
+            return
+
+        self.restore_dir("/etc/letsencrypt")
+        self.restore_dir("/etc/cockpit/ws-certs.d", restart_unit="cockpit")
+        m.execute(FAKE_LINEAGE)
+
+        self.login_and_go("/letsencrypt")
+        b.wait_in_text("#certificates", "test.example.com")
+        b.wait_in_text("#certificates", "HTTP (standalone)")
+
+        # DNS credentials are stored root-only
+        b.click("#add-credentials")
+        b.wait_visible("#credentials-dialog")
+        b.select_from_dropdown("#credentials-provider", "dns-cloudflare")
+        b.set_input_text("#credentials-label", "Test zone")
+        b.set_input_text("#credentials-dns_cloudflare_api_token", "token123")
+        b.click("#credentials-dialog button.pf-m-primary")
+        b.wait_not_present("#credentials-dialog")
+        b.wait_in_text("#dns-credentials", "Test zone")
+        path = "/etc/letsencrypt/cockpit/credentials/cloudflare-test-zone.ini"
+        self.assertEqual(m.execute(f"stat -c %a {path}").strip(), "600")
+        self.assertIn("dns_cloudflare_api_token = token123", m.execute(f"cat {path}"))
+
+        # Use the certificate for Cockpit
+        b.click("#cert-actions-test\\.example\\.com")
+        b.click("button:contains('Use for Cockpit')")
+        b.wait_visible("#confirm-dialog")
+        b.click("#confirm-dialog button.pf-m-primary")
+        b.wait_in_text("#confirm-dialog", "Restart the web console?")
+        b.click("#confirm-dialog button.pf-m-link")
+        b.wait_not_present("#confirm-dialog")
+        b.wait_in_text("#cockpit-cert-source", "test.example.com")
+        m.execute("test -s /etc/cockpit/ws-certs.d/90-letsencrypt.cert")
+        m.execute("test -x /etc/letsencrypt/renewal-hooks/deploy/50-cockpit-ws.sh")
+
+        # A renewal of another lineage leaves Cockpit alone; this one redeploys
+        m.execute("rm /etc/cockpit/ws-certs.d/90-letsencrypt.*")
+        m.execute("COCKPIT_LE_NO_RESTART=1 RENEWED_LINEAGE=/etc/letsencrypt/live/other "
+                  "/etc/letsencrypt/renewal-hooks/deploy/50-cockpit-ws.sh")
+        m.execute("! test -e /etc/cockpit/ws-certs.d/90-letsencrypt.cert")
+        m.execute("COCKPIT_LE_NO_RESTART=1 RENEWED_LINEAGE=/etc/letsencrypt/live/test.example.com "
+                  "/etc/letsencrypt/renewal-hooks/deploy/50-cockpit-ws.sh")
+        m.execute("cmp /etc/cockpit/ws-certs.d/90-letsencrypt.key /etc/letsencrypt/live/test.example.com/privkey.pem")
+
+        # Stop using it again
+        b.click("#cockpit-cert-stop")
+        b.click("#confirm-dialog button.pf-m-primary")
+        b.wait_in_text("#confirm-dialog", "Restart the web console?")
+        b.click("#confirm-dialog button.pf-m-link")
+        b.wait_not_in_text("#cockpit-cert-source", "test.example.com")
+        m.execute("! test -e /etc/letsencrypt/renewal-hooks/deploy/50-cockpit-ws.sh")
+
+
+if __name__ == '__main__':
+    testlib.test_main()

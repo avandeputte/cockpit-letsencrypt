@@ -1,0 +1,85 @@
+# Build RPM and DEB packages on every push and pull request, and attach them
+# (plus the source tarball) to a GitHub release when a version tag is pushed.
+name: packages
+on:
+  push:
+    branches: [main]
+    tags: ['[0-9]*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Fetch cockpit library and node modules
+        run: make pkg/lib/cockpit-po-plugin.js package-lock.json
+      - name: Lint
+        run: npm run eslint && npm run stylelint && npm run typecheck
+      - name: Unit tests
+        run: npm test
+
+  rpm:
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install build dependencies
+        run: dnf install -y git make jq nodejs npm nodejs-esbuild rpm-build gettext libappstream-glib xz tar findutils
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Mark checkout as safe
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build source tarballs and RPM
+        run: make rpm
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: |
+            cockpit-letsencrypt-*.noarch.rpm
+            cockpit-letsencrypt-*.tar.xz
+
+  deb:
+    runs-on: ubuntu-latest
+    container: debian:trixie
+    steps:
+      - name: Install build dependencies
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            ca-certificates git make nodejs npm build-essential debhelper dpkg-dev gettext
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Mark checkout as safe
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - name: Build DEB
+        run: make deb
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: cockpit-letsencrypt_*_all.deb
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [check, rpm, deb]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" --generate-notes \
+            cockpit-letsencrypt*.rpm cockpit-letsencrypt*.deb cockpit-letsencrypt-*.tar.xz

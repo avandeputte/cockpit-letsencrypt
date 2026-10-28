@@ -1,0 +1,15 @@
+pkgname=cockpit-letsencrypt
+pkgver=VERSION
+pkgrel=1
+pkgdesc="Cockpit module to manage Let's Encrypt certificates"
+arch=('any')
+url='https://github.com/avandeputte/cockpit-letsencrypt'
+license=(LGPL)
+source=("SOURCE")
+sha256sums=('SKIP')
+
+package() {
+  depends=(cockpit certbot)
+  cd $pkgname
+  make DESTDIR="$pkgdir" install PREFIX=/usr
+}

@@ -1,0 +1,16 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@
+
+# dist/ is built by "make deb" before dpkg-buildpackage runs
+override_dh_auto_build:
+
+override_dh_auto_test:
+
+# keep dist/ and node_modules/
+override_dh_auto_clean:
+
+override_dh_auto_install:
+	$(MAKE) install DESTDIR=$(CURDIR)/debian/cockpit-letsencrypt PREFIX=/usr
+	find $(CURDIR)/debian/cockpit-letsencrypt -name '*.map' -delete
