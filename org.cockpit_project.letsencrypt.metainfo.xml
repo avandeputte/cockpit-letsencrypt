@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="addon">
+  <id>org.cockpit_project.letsencrypt</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <name>Let's Encrypt</name>
+  <summary>Manage Let's Encrypt certificates</summary>
+  <description>
+    <p>
+      Request, renew and delete Let's Encrypt certificates with certbot,
+      using HTTP-01 or DNS-01 validation through certbot DNS plugins.
+      A certificate can be installed as the web console's own certificate
+      and is redeployed after every renewal.
+    </p>
+  </description>
+  <extends>org.cockpit_project.cockpit</extends>
+  <launchable type="cockpit-manifest">letsencrypt</launchable>
+  <url type="homepage">https://github.com/avandeputte/cockpit-letsencrypt</url>
+  <url type="bugtracker">https://github.com/avandeputte/cockpit-letsencrypt/issues</url>
+  <update_contact>20116257+avandeputte@users.noreply.github.com</update_contact>
+</component>

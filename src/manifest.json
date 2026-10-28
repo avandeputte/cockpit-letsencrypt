@@ -1,0 +1,17 @@
+{
+    "requires": {
+        "cockpit": "137"
+    },
+
+    "tools": {
+        "index": {
+            "label": "Let's Encrypt",
+            "order": 60,
+            "keywords": [
+                {
+                    "matches": ["certificate", "certbot", "acme", "tls", "ssl", "https", "letsencrypt"]
+                }
+            ]
+        }
+    }
+}

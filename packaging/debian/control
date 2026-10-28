@@ -1,0 +1,20 @@
+Source: cockpit-letsencrypt
+Section: admin
+Priority: optional
+Maintainer: Alex <20116257+avandeputte@users.noreply.github.com>
+Build-Depends: debhelper-compat (= 13), gettext
+Standards-Version: 4.7.0
+Homepage: https://github.com/avandeputte/cockpit-letsencrypt
+Rules-Requires-Root: no
+
+Package: cockpit-letsencrypt
+Architecture: all
+Depends: ${misc:Depends}, cockpit-bridge, certbot
+Recommends: cockpit-ws, cockpit-packagekit
+Suggests: python3-certbot-dns-cloudflare, python3-certbot-dns-rfc2136
+Description: Cockpit module to manage Let's Encrypt certificates
+ Request, renew and delete Let's Encrypt certificates from the Cockpit web
+ console using certbot, with HTTP-01 or DNS-01 validation (including
+ wildcard certificates through certbot DNS plugins). A certificate can be
+ installed as Cockpit's own web server certificate and is redeployed
+ automatically after every renewal.

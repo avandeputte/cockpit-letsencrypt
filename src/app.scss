@@ -1,0 +1,28 @@
+// SPDX-License-Identifier: LGPL-2.1-or-later
+@use "page.scss";
+@use "ct-card.scss";
+
+#letsencrypt .pf-v6-c-card {
+    @extend .ct-card;
+}
+
+.command-output {
+    max-block-size: 50vh;
+    min-block-size: 12rem;
+    overflow: auto;
+    padding: var(--pf-t--global--spacer--sm);
+    margin-block-start: var(--pf-t--global--spacer--md);
+    background-color: var(--pf-t--global--background--color--secondary--default);
+    font-family: var(--pf-t--global--font--family--mono);
+    font-size: var(--pf-t--global--font--size--sm);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.credentials-textarea textarea {
+    font-family: var(--pf-t--global--font--family--mono);
+}
+
+.cert-domains {
+    overflow-wrap: anywhere;
+}
