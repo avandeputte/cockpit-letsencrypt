@@ -109,7 +109,7 @@ The `packages` workflow runs on every push and pull request:
    source tarball to the GitHub release for that tag, and creates the release
    if needed.
 
-To release a new version:
+To release a new version, push a version tag:
 
 ```sh
 git checkout main && git pull
@@ -117,13 +117,15 @@ git tag -a 0.2.0 -m "cockpit-letsencrypt 0.2.0"
 git push origin 0.2.0
 ```
 
-The workflow builds the packages as that version, and the release appears on
-the [releases page](https://github.com/avandeputte/cockpit-letsencrypt/releases)
+or run the workflow by hand on `main` (*Actions → packages → Run workflow*)
+and enter the new version under **release**. The workflow builds the packages
+as that version, creates the tag on the commit it built, and publishes the
+release on the [releases page](https://github.com/avandeputte/cockpit-letsencrypt/releases)
 with generated release notes.
 
 To rebuild the packages of an existing release, for example after a CI fix,
 run the workflow by hand (*Actions → packages → Run workflow*) and enter the
-tag. It checks out the tag, rebuilds, and replaces that release's assets.
+tag under **tag**. It checks out the tag, rebuilds, and replaces that release's assets.
 
 ## Screenshots
 
