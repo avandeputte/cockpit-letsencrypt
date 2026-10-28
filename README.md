@@ -33,17 +33,30 @@ there is no extra daemon. The page needs administrative access.
 
 The credentials dialog knows the fields for the certbot plugins that
 distributions package (`python3-certbot-dns-<name>` on both Fedora/RHEL and
-Debian/Ubuntu), and offers to install a missing plugin through PackageKit:
+Debian/Ubuntu):
 
 Cloudflare, DigitalOcean, DNSimple, DNS Made Easy, Gehirn, Google Cloud DNS,
 Linode, LuaDNS, NS1, OVH, RFC 2136 (BIND, PowerDNS, Knot, ...), Amazon Route 53
 and Sakura Cloud.
 
-It also knows some community plugins that you install with pip into certbot's
-Python environment: Duck DNS (`certbot-dns-duckdns`), Gandi
-(`certbot-plugin-gandi`), Hetzner (`certbot-dns-hetzner`) and Porkbun
-(`certbot-dns-porkbun`). Any other installed `dns-*` plugin shows up as well;
-its credentials are entered as a raw INI file.
+It also knows some community plugins from PyPI: Duck DNS
+(`certbot-dns-duckdns`), Gandi (`certbot-plugin-gandi`), Hetzner
+(`certbot-dns-hetzner`) and Porkbun (`certbot-dns-porkbun`). Any other
+installed `dns-*` plugin shows up as well; its credentials are entered as a raw
+INI file.
+
+A missing plugin is installed automatically when you save credentials for it
+or request a certificate that needs it, the same way certbot itself is
+installed:
+
+* certbot from a **distribution package**: the plugin's distribution package,
+  with dnf, apt, zypper or pacman,
+* certbot in a **pip virtual environment** (for example `/opt/certbot`, as in
+  certbot's own instructions): the plugin's pip package, into that environment,
+* certbot as a **snap**: the `certbot-dns-<name>` snap.
+
+Distributions don't package the community plugins, so these need certbot from
+pip or snap.
 
 ## Installing
 

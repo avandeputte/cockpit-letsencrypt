@@ -13,8 +13,10 @@ import {
     cockpitWsConf, parseCertificates, parseCockpitWsConf, parseEnsureCheck, parsePlugins, parseRenewalConfs,
 } from './certbot';
 import type { CertificateInfo, CredentialsProfile, PluginInfo, RenewalConf } from './certbot';
+import type { Provider } from './providers';
 
 import deployHookScript from './deploy-hook.sh';
+import installPluginScript from './install-plugin.sh';
 
 const SU = { superuser: "require" as const, err: "message" as const };
 
@@ -87,6 +89,13 @@ export function runStreaming(args: string[], onOutput: (text: string) => void,
     const proc = cockpit.spawn(args, { superuser: "require", err: "out", environ: ["PYTHONUNBUFFERED=1", ...environ] });
     proc.stream(data => { onOutput(data) });
     return proc;
+}
+
+/* Installs a certbot plugin the same way certbot is installed: distro
+ * package, pip into certbot's virtual environment, or snap */
+export function installPluginArgs(provider: Provider): string[] {
+    return ["sh", "-c", installPluginScript, "install-plugin",
+        provider.plugin, provider.package ?? "", provider.pip ?? `certbot-${provider.plugin}`];
 }
 
 export function renewArgs(certName: string | null, force: boolean): string[] {

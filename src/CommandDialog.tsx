@@ -17,12 +17,16 @@ import { runStreaming } from './backend';
 const _ = cockpit.gettext;
 
 /* Runs a command (usually certbot) and shows its live output. Resolves to
- * true when the command succeeded. */
-export const CommandDialog = ({ title, args, environ, successText, dialogResult }: {
+ * true when the command succeeded. With autoClose, a successful run closes
+ * the dialog by itself, for steps that lead into another one. */
+export const CommandDialog = ({ title, args, command, environ, successText, autoClose, dialogResult }: {
     title: string,
     args: string[],
+    /* shown instead of args, e.g. for an embedded script */
+    command?: string,
     environ?: string[],
     successText?: string,
+    autoClose?: boolean,
     dialogResult: DialogResult<boolean>,
 }) => {
     const [output, setOutput] = useState("");
@@ -34,7 +38,12 @@ export const CommandDialog = ({ title, args, environ, successText, dialogResult 
     useEffect(() => {
         const p = runStreaming(args, text => setOutput(o => o + text), environ);
         proc.current = p;
-        p.then(() => setState("done"))
+        p.then(() => {
+            if (autoClose)
+                dialogResult.resolve(true);
+            else
+                setState("done");
+        })
                 .catch(ex => {
                     setError(ex.message || String(ex));
                     setState("failed");
@@ -59,7 +68,7 @@ export const CommandDialog = ({ title, args, environ, successText, dialogResult 
                 {state === "done" && <Alert variant="success" isInline title={successText ?? _("Completed")} />}
                 {state === "failed" && <Alert variant="danger" isInline title={_("Failed")}>{error}</Alert>}
                 <pre ref={pre} className="command-output" aria-live="polite">
-                    {"$ " + args.join(" ") + "\n" + output}
+                    {"$ " + (command ?? args.join(" ")) + "\n" + output}
                 </pre>
             </ModalBody>
             <ModalFooter>
