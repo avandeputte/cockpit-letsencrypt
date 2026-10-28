@@ -1,7 +1,8 @@
 # Build RPM and DEB packages on every push and pull request, and attach them
 # (plus the source tarball) to a GitHub release when a version tag is pushed.
-# Running the workflow by hand with a tag rebuilds that tag's packages and
-# replaces the assets of its release.
+# Running the workflow by hand with "tag" rebuilds an existing tag's packages
+# and replaces the assets of its release. Running it with "release" builds the
+# chosen branch as a new version, and creates that tag and its release.
 name: packages
 on:
   push:
@@ -12,6 +13,10 @@ on:
     inputs:
       tag:
         description: 'Existing tag to build and (re)publish, e.g. 0.1.0'
+        required: false
+        default: ''
+      release:
+        description: 'New version to release from the chosen branch, e.g. 0.2.0 (creates the tag)'
         required: false
         default: ''
 
@@ -38,7 +43,7 @@ jobs:
     container: fedora:latest
     env:
       # release version when building a tag; otherwise derived from git describe
-      TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
+      TAG: ${{ inputs.tag || inputs.release || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
     steps:
       - name: Install build dependencies
         run: dnf install -y git make jq nodejs npm nodejs-esbuild rpm-build gettext libappstream-glib xz tar findutils
@@ -62,7 +67,7 @@ jobs:
     container: debian:trixie
     env:
       # release version when building a tag; otherwise derived from git describe
-      TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
+      TAG: ${{ inputs.tag || inputs.release || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
     steps:
       - name: Install build dependencies
         run: |
@@ -83,14 +88,14 @@ jobs:
           path: cockpit-letsencrypt_*_all.deb
 
   release:
-    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != '' || inputs.release != ''
     needs: [check, rpm, deb]
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ inputs.tag || inputs.release || github.ref_name }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -105,5 +110,7 @@ jobs:
                   xargs -r -n1 gh release delete-asset "$TAG" --repo "$GITHUB_REPOSITORY" -y
               gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber $files
           else
-              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes $files
+              # for a new release this also creates the tag, on the commit that was built
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+                  --title "$TAG" --generate-notes $files
           fi
