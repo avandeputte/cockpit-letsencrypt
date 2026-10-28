@@ -1,5 +1,7 @@
 # Build RPM and DEB packages on every push and pull request, and attach them
 # (plus the source tarball) to a GitHub release when a version tag is pushed.
+# Running the workflow by hand with a tag rebuilds that tag's packages and
+# replaces the assets of its release.
 name: packages
 on:
   push:
@@ -7,6 +9,11 @@ on:
     tags: ['[0-9]*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to build and (re)publish, e.g. 0.1.0'
+        required: false
+        default: ''
 
 jobs:
   check:
@@ -15,6 +22,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -28,16 +36,20 @@ jobs:
   rpm:
     runs-on: ubuntu-latest
     container: fedora:latest
+    env:
+      # release version when building a tag; otherwise derived from git describe
+      TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
     steps:
       - name: Install build dependencies
         run: dnf install -y git make jq nodejs npm nodejs-esbuild rpm-build gettext libappstream-glib xz tar findutils
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
       - name: Mark checkout as safe
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Build source tarballs and RPM
-        run: make rpm
+        run: make rpm ${TAG:+VERSION=$TAG}
       - uses: actions/upload-artifact@v4
         with:
           name: rpm
@@ -48,6 +60,9 @@ jobs:
   deb:
     runs-on: ubuntu-latest
     container: debian:trixie
+    env:
+      # release version when building a tag; otherwise derived from git describe
+      TAG: ${{ inputs.tag || (startsWith(github.ref, 'refs/tags/') && github.ref_name) || '' }}
     steps:
       - name: Install build dependencies
         run: |
@@ -57,29 +72,38 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
       - name: Mark checkout as safe
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Build DEB
-        run: make deb
+        run: make deb ${TAG:+VERSION=$TAG}
       - uses: actions/upload-artifact@v4
         with:
           name: deb
           path: cockpit-letsencrypt_*_all.deb
 
   release:
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
     needs: [check, rpm, deb]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           merge-multiple: true
-      - name: Create release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Create or update release
         run: |
-          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
-            --title "$GITHUB_REF_NAME" --generate-notes \
-            cockpit-letsencrypt*.rpm cockpit-letsencrypt*.deb cockpit-letsencrypt-*.tar.xz
+          set -x
+          files="$(ls cockpit-letsencrypt-*.rpm cockpit-letsencrypt_*.deb cockpit-letsencrypt-[0-9]*.tar.xz)"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+              # replace all assets of an existing release
+              gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets -q '.assets[].name' |
+                  xargs -r -n1 gh release delete-asset "$TAG" --repo "$GITHUB_REPOSITORY" -y
+              gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber $files
+          else
+              gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --title "$TAG" --generate-notes $files
+          fi
