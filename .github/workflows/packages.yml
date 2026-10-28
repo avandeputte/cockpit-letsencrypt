@@ -12,7 +12,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: actions/setup-node@v4
@@ -31,7 +31,7 @@ jobs:
     steps:
       - name: Install build dependencies
         run: dnf install -y git make jq nodejs npm nodejs-esbuild rpm-build gettext libappstream-glib xz tar findutils
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Mark checkout as safe
@@ -53,8 +53,8 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-            ca-certificates git make nodejs npm debhelper dpkg-dev gettext
-      - uses: actions/checkout@v4
+            ca-certificates git make nodejs npm build-essential debhelper dpkg-dev gettext
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - name: Mark checkout as safe
