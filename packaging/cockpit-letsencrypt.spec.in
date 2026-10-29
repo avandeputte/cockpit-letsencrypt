@@ -35,6 +35,7 @@ BuildRequires: nodejs-esbuild
 
 Requires: cockpit-bridge
 Requires: certbot
+Requires: openssl
 Recommends: cockpit-packagekit
 
 %{NPM_PROVIDES}

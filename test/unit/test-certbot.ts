@@ -3,70 +3,67 @@ import assert from 'node:assert/strict';
 
 import {
     certificateStatus, certonlyArgs, coversHost, credentialsFileContent, defaultCertName, dnsPlugins,
-    formatIni, isValidCertName, isValidDomain, parseCertificates, parseCockpitWsConf, parseEnsureCheck,
+    formatIni, isValidCertName, isValidDomain, parseCertificates, parseCockpitWsConf, parseEnsureCheck, parseOpensslDate,
     parseIni, parsePlugins, parseRenewalConfs, slugify, splitDomains, cockpitWsConf,
 } from '../../src/certbot';
 import { findProvider, genericProvider } from '../../src/providers';
 
-// certbot 5.x output (captured from a real run)
-const CERTIFICATES_NEW = `Saving debug log to /var/log/letsencrypt/letsencrypt.log
-
-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
-Found the following certs:
-  Certificate Name: example.org
-    Serial Number: 608806c5dbf1d2cb6e1793457248772f7a28a99b
-    Key Type: ECDSA
-    Identifiers: example.org *.example.org
-    Expiry Date: 2026-12-27 17:45:19+00:00 (INVALID: TEST_CERT)
-    Certificate Path: /etc/letsencrypt/live/example.org/fullchain.pem
-    Private Key Path: /etc/letsencrypt/live/example.org/privkey.pem
-  Certificate Name: cockpit.home.example.net
-    Serial Number: 3abc
-    Key Type: RSA
-    Identifiers: cockpit.home.example.net
-    Expiry Date: 2027-01-20 08:00:00+00:00 (VALID: 84 days)
-    Certificate Path: /etc/letsencrypt/live/cockpit.home.example.net/fullchain.pem
-    Private Key Path: /etc/letsencrypt/live/cockpit.home.example.net/privkey.pem
-- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// backend.listCertificates() output (captured from a real run with OpenSSL 3.0)
+const CERTIFICATES = `==> example.org
+fullchain=/etc/letsencrypt/live/example.org/fullchain.pem
+privkey=/etc/letsencrypt/live/example.org/privkey.pem
+serial=091239574DC93EEFD987C3D4568B47FC
+notAfter=Dec 27 17:45:19 2026 GMT
+keyalg=id-ecPublicKey
+                DNS:example.org, DNS:*.example.org
+==> cockpit.home.example.net
+fullchain=/etc/letsencrypt/live/cockpit.home.example.net/fullchain.pem
+privkey=/etc/letsencrypt/live/cockpit.home.example.net/privkey.pem
+serial=3ABC
+notAfter=Jan  2 08:00:00 2027 GMT
+keyalg=rsaEncryption
+                DNS:cockpit.home.example.net, IP Address:192.0.2.10
+==> broken
+fullchain=/etc/letsencrypt/live/broken/fullchain.pem
+privkey=/etc/letsencrypt/live/broken/privkey.pem
 `;
 
-// certbot 1.x/2.x output uses "Domains:"
-const CERTIFICATES_OLD = `Found the following certs:
-  Certificate Name: old.example.com
-    Serial Number: 1
-    Key Type: RSA
-    Domains: old.example.com www.old.example.com
-    Expiry Date: 2020-01-01 00:00:00+00:00 (INVALID: EXPIRED)
-    Certificate Path: /etc/letsencrypt/live/old.example.com/fullchain.pem
-    Private Key Path: /etc/letsencrypt/live/old.example.com/privkey.pem
-`;
+const STAGING_RENEWAL = { 'example.org': { server: 'https://acme-staging-v02.api.letsencrypt.org/directory' } };
 
-test('parseCertificates (Identifiers)', () => {
-    const certs = parseCertificates(CERTIFICATES_NEW);
-    assert.equal(certs.length, 2);
+test('parseCertificates', () => {
+    const certs = parseCertificates(CERTIFICATES, STAGING_RENEWAL);
+    assert.equal(certs.length, 3);
     assert.equal(certs[0].name, 'example.org');
     assert.deepEqual(certs[0].domains, ['example.org', '*.example.org']);
     assert.equal(certs[0].keyType, 'ECDSA');
+    assert.equal(certs[0].serial, '091239574dc93eefd987c3d4568b47fc');
     assert.equal(certs[0].expiry?.toISOString(), '2026-12-27T17:45:19.000Z');
     assert.equal(certs[0].validity, 'INVALID: TEST_CERT');
+    assert.equal(certs[1].keyType, 'RSA');
+    assert.deepEqual(certs[1].domains, ['cockpit.home.example.net', '192.0.2.10']);
+    assert.equal(certs[1].expiry?.toISOString(), '2027-01-02T08:00:00.000Z');
+    assert.equal(certs[1].validity, '');
     assert.equal(certs[1].certPath, '/etc/letsencrypt/live/cockpit.home.example.net/fullchain.pem');
     assert.equal(certs[1].keyPath, '/etc/letsencrypt/live/cockpit.home.example.net/privkey.pem');
+    // unreadable certificate file
+    assert.equal(certs[2].expiry, null);
+    assert.deepEqual(certs[2].domains, []);
+    assert.deepEqual(parseCertificates(''), []);
 });
 
-test('parseCertificates (Domains) and no certificates', () => {
-    const certs = parseCertificates(CERTIFICATES_OLD);
-    assert.deepEqual(certs[0].domains, ['old.example.com', 'www.old.example.com']);
-    assert.deepEqual(parseCertificates('Saving debug log\nNo certificates found.\n'), []);
+test('parseOpensslDate', () => {
+    assert.equal(parseOpensslDate('Nov  9 20:57:01 2026 GMT')?.toISOString(), '2026-11-09T20:57:01.000Z');
+    assert.equal(parseOpensslDate('garbage'), null);
 });
 
 test('certificateStatus', () => {
     const now = new Date('2026-10-28T00:00:00Z');
-    const [test, valid] = parseCertificates(CERTIFICATES_NEW);
+    const [test, valid, broken] = parseCertificates(CERTIFICATES, STAGING_RENEWAL);
     assert.equal(certificateStatus(test, now), 'test');
     assert.equal(certificateStatus(valid, now), 'valid');
-    assert.equal(certificateStatus(valid, new Date('2027-01-10T00:00:00Z')), 'expiring');
+    assert.equal(certificateStatus(valid, new Date('2026-12-20T00:00:00Z')), 'expiring');
     assert.equal(certificateStatus(valid, new Date('2027-02-01T00:00:00Z')), 'expired');
-    assert.equal(certificateStatus(parseCertificates(CERTIFICATES_OLD)[0], now), 'expired');
+    assert.equal(certificateStatus(broken, now), 'invalid');
 });
 
 test('parseRenewalConfs', () => {

@@ -69,9 +69,8 @@ npm run typecheck    # tsc --noEmit
 npm test             # unit tests
 ```
 
-The unit tests (`test/unit/test-*.ts`) cover the certbot output parsers (old
-and new `certbot certificates` formats, `certbot plugins`, renewal
-configuration), the credentials file format, domain validation and the
+The unit tests (`test/unit/test-*.ts`) cover the parsers (certificate details
+read with openssl, `certbot plugins`, renewal configuration), the credentials file format, domain validation and the
 `certonly` command lines. `test/unit/run.js` bundles each test with esbuild,
 replacing the `cockpit` module with a small stub, and runs it with
 `node --test`.

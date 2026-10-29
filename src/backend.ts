@@ -20,6 +20,12 @@ import installPluginScript from './install-plugin.sh';
 
 const SU = { superuser: "require" as const, err: "message" as const };
 
+/* Quick check that doesn't start certbot */
+export async function certbotInstalled(): Promise<boolean> {
+    const out = await cockpit.script("command -v certbot || true", [], SU);
+    return out.trim() !== "";
+}
+
 export async function certbotVersion(): Promise<string | null> {
     try {
         const out = await cockpit.spawn(["certbot", "--version"], { ...SU, err: "out" });
@@ -31,9 +37,25 @@ export async function certbotVersion(): Promise<string | null> {
     }
 }
 
-export async function listCertificates(): Promise<CertificateInfo[]> {
-    const out = await cockpit.spawn(["certbot", "certificates"], { ...SU, err: "ignore" });
-    return parseCertificates(out);
+/* Read each lineage's certificate with openssl. This is much faster than
+ * "certbot certificates", which also checks revocation over the network. */
+export async function listCertificates(renewal: Record<string, RenewalConf>): Promise<CertificateInfo[]> {
+    const out = await cockpit.script(
+        `cd ${LE_DIR}/renewal 2>/dev/null || exit 0
+         for f in *.conf; do
+             [ -e "$f" ] || continue
+             get() { sed -n "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*//p" "$f" | head -n 1; }
+             cert=$(get cert)
+             echo "==> \${f%.conf}"
+             echo "fullchain=$(get fullchain)"
+             echo "privkey=$(get privkey)"
+             [ -r "$cert" ] || continue
+             openssl x509 -in "$cert" -noout -serial -enddate 2>/dev/null
+             openssl x509 -in "$cert" -noout -text 2>/dev/null |
+                 sed -n -e '/X509v3 Subject Alternative Name:/{n;p;}' \\
+                        -e 's/^[[:space:]]*Public Key Algorithm:[[:space:]]*/keyalg=/p'
+         done`, [], SU);
+    return parseCertificates(out, renewal);
 }
 
 export async function listRenewalConfs(): Promise<Record<string, RenewalConf>> {
