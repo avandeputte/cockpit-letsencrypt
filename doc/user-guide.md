@@ -44,7 +44,7 @@ installing this module.
 | Domains | Every name the certificate covers, including wildcards. |
 | Validation | How certbot proves you control the domains at renewal: *DNS: provider*, *HTTP (standalone)* or *HTTP (webroot)*. Read from certbot's renewal configuration. |
 | Expires | The certificate's expiry date. |
-| Status | **Valid, N days left**; **Expires in N days** when 21 days or fewer remain; **Expired**; **Test certificate** for certificates from the staging server, which browsers don't trust; **Invalid** when certbot can't read the certificate. |
+| Status | **Valid, N days left**; **Expires in N days** when 21 days or fewer remain; **Expired**; **Test certificate** for certificates from the staging server, which browsers don't trust; **Invalid** when the certificate file can't be read. |
 
 Each row has a menu with the actions for that certificate:
 

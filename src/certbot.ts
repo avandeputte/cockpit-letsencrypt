@@ -24,13 +24,15 @@ export const STAGING_SERVER = "https://acme-staging-v02.api.letsencrypt.org/dire
 /* certificates that expire within this many days are flagged */
 export const EXPIRY_WARNING_DAYS = 21;
 
+export type RenewalConf = Record<string, string>;
+
 export interface CertificateInfo {
     name: string;
     serial: string;
     keyType: string;
     domains: string[];
     expiry: Date | null;
-    /* certbot's verdict, e.g. "VALID: 89 days", "INVALID: TEST_CERT", "INVALID: EXPIRED" */
+    /* "INVALID: TEST_CERT" for certificates from the staging server, else empty */
     validity: string;
     certPath: string;
     keyPath: string;
@@ -38,29 +40,31 @@ export interface CertificateInfo {
 
 export type CertificateStatus = "valid" | "expiring" | "expired" | "test" | "invalid";
 
-/* Parse the output of "certbot certificates". Both the older "Domains:" and
- * the newer "Identifiers:" labels are understood. */
-export function parseCertificates(output: string): CertificateInfo[] {
+/* Parse the per-lineage certificate details that backend.listCertificates()
+ * reads with openssl, instead of running "certbot certificates": that checks
+ * every certificate's revocation over OCSP, which can take many seconds per
+ * certificate (Let's Encrypt has shut down its OCSP service). Each lineage
+ * starts with "==> name", followed by "fullchain=" and "privkey=" from its
+ * renewal configuration, and openssl's -serial, -enddate, subjectAltName and
+ * public key algorithm output. Test certificates are marked from the renewal
+ * configuration's ACME server. */
+export function parseCertificates(output: string, renewal: Record<string, RenewalConf> = {}): CertificateInfo[] {
     const certs: CertificateInfo[] = [];
     let cur: CertificateInfo | null = null;
 
     for (const raw of output.split("\n")) {
         const line = raw.trim();
-        const m = line.match(/^([A-Za-z ]+):\s*(.*)$/);
-        if (!m)
-            continue;
-        const [, key, value] = m;
-
-        if (key === "Certificate Name") {
+        const header = line.match(/^==> (.+)$/);
+        if (header) {
             cur = {
-                name: value,
+                name: header[1],
                 serial: "",
                 keyType: "",
                 domains: [],
                 expiry: null,
-                validity: "",
+                validity: renewal[header[1]]?.server === STAGING_SERVER ? "INVALID: TEST_CERT" : "",
                 certPath: "",
-                keyPath: ""
+                keyPath: "",
             };
             certs.push(cur);
             continue;
@@ -68,36 +72,49 @@ export function parseCertificates(output: string): CertificateInfo[] {
         if (!cur)
             continue;
 
-        switch (key) {
-        case "Serial Number":
-            cur.serial = value;
-            break;
-        case "Key Type":
-            cur.keyType = value;
-            break;
-        case "Domains":
-        case "Identifiers":
-            cur.domains = value.split(/\s+/).filter(Boolean);
-            break;
-        case "Expiry Date": {
-            const em = value.match(/^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})([+-]\d{2}:\d{2})?\s*(?:\((.*)\))?/);
-            if (em) {
-                const d = new Date(`${em[1]}T${em[2]}${em[3] ?? "Z"}`);
-                cur.expiry = isNaN(d.getTime()) ? null : d;
-                cur.validity = em[4] ?? "";
-            }
-            break;
+        if (/(^|,\s*)(DNS|IP Address):/.test(line)) {
+            cur.domains.push(...line.split(/,\s*/)
+                    .map(e => e.replace(/^(DNS|IP Address):/, "").trim())
+                    .filter(Boolean));
+            continue;
         }
-        case "Certificate Path":
+
+        const eq = line.indexOf("=");
+        if (eq < 0)
+            continue;
+        const key = line.slice(0, eq);
+        const value = line.slice(eq + 1).trim();
+        switch (key) {
+        case "fullchain":
             cur.certPath = value;
             break;
-        case "Private Key Path":
+        case "privkey":
             cur.keyPath = value;
+            break;
+        case "serial":
+            cur.serial = value.toLowerCase();
+            break;
+        case "notAfter":
+            cur.expiry = parseOpensslDate(value);
+            break;
+        case "keyalg":
+            cur.keyType = value === "id-ecPublicKey" ? "ECDSA" : value === "rsaEncryption" ? "RSA" : value;
             break;
         }
     }
 
     return certs;
+}
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/* openssl's date format, e.g. "Dec 28 20:57:00 2026 GMT" */
+export function parseOpensslDate(value: string): Date | null {
+    const m = value.match(/^([A-Z][a-z]{2})\s+(\d{1,2})\s+(\d{2}):(\d{2}):(\d{2})\s+(\d{4})/);
+    const month = m ? MONTHS.indexOf(m[1]) : -1;
+    if (!m || month < 0)
+        return null;
+    return new Date(Date.UTC(Number(m[6]), month, Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5])));
 }
 
 export function certificateStatus(cert: CertificateInfo, now: Date = new Date()): CertificateStatus {
@@ -117,8 +134,6 @@ export function certificateStatus(cert: CertificateInfo, now: Date = new Date())
 export function daysUntil(date: Date, now: Date = new Date()): number {
     return Math.floor((date.getTime() - now.getTime()) / 86400000);
 }
-
-export type RenewalConf = Record<string, string>;
 
 /* Parse renewal configuration files. The input is the concatenation of
  * several files, each introduced by a "==> /path/to/name.conf <==" line

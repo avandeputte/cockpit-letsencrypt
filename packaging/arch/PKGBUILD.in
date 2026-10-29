@@ -9,7 +9,7 @@ source=("SOURCE")
 sha256sums=('SKIP')
 
 package() {
-  depends=(cockpit certbot)
+  depends=(cockpit certbot openssl)
   cd $pkgname
   make DESTDIR="$pkgdir" install PREFIX=/usr
 }

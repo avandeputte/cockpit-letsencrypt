@@ -48,7 +48,8 @@ type DialogsType = ReturnType<typeof useDialogs>;
 interface State {
     certificates: CertificateInfo[];
     renewal: Record<string, RenewalConf>;
-    plugins: PluginInfo[];
+    /* null while "certbot plugins" is still running */
+    plugins: PluginInfo[] | null;
     timer: TimerState | null;
     cockpitCert: CockpitCertState | null;
 }
@@ -75,26 +76,33 @@ export const Application = () => {
 };
 
 const Certificates = () => {
-    const [version, setVersion] = useState<string | null | undefined>(undefined);
+    /* whether certbot is installed; undefined until known */
+    const [hasCertbot, setHasCertbot] = useState<boolean | undefined>(undefined);
     const [state, setState] = useState<State | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [profiles, setProfiles] = useState<CredentialsProfile[]>([]);
     const [settings, setSettings] = useState<Settings>({});
+    /* Starting certbot takes from one to several seconds, so its version and
+     * plugin list load in the background and the page doesn't wait for them.
+     * plugins is null until "certbot plugins" has answered. */
+    const [version, setVersion] = useState<string | null>(null);
+    const [plugins, setPlugins] = useState<PluginInfo[] | null>(null);
 
     const reload = useCallback(async () => {
         try {
-            const v = await backend.certbotVersion();
-            setVersion(v);
-            if (v === null)
+            const installed = await backend.certbotInstalled();
+            setHasCertbot(installed);
+            if (!installed)
                 return;
-            const [certificates, renewal, plugins, timer, cockpitCert] = await Promise.all([
-                backend.listCertificates(),
+            backend.certbotVersion().then(setVersion, ex => console.warn("certbot --version:", ex));
+            backend.listPlugins().then(setPlugins, ex => console.warn("certbot plugins:", ex));
+            const [renewal, timer, cockpitCert] = await Promise.all([
                 backend.listRenewalConfs(),
-                backend.listPlugins(),
                 backend.renewalTimer().catch(() => null),
                 backend.cockpitCertState().catch(() => null),
             ]);
-            setState({ certificates, renewal, plugins, timer, cockpitCert });
+            const certificates = await backend.listCertificates(renewal);
+            setState({ certificates, renewal, timer, cockpitCert, plugins: null });
             setError(null);
         } catch (ex) {
             setError((ex as Error).message);
@@ -115,22 +123,23 @@ const Certificates = () => {
         return () => w.remove();
     }, [settingsFile]);
 
-    if (version === undefined || (version && !state && !error))
-        return <EmptyStatePanel loading title={_("Loading certificates")} />;
-
-    if (version === null)
+    if (hasCertbot === false)
         return <CertbotMissing onInstalled={reload} />;
+
+    if (!state && !error)
+        return <EmptyStatePanel loading title={_("Loading certificates")} />;
 
     if (!state)
         return <EmptyStatePanel icon={ExclamationCircleIcon} title={_("Could not read certificates")} paragraph={error} />;
+    const full = { ...state, plugins };
 
     return (
         <PageSection>
             <Stack hasGutter>
                 {error && <Alert variant="danger" isInline title={error} />}
-                <CockpitCertCard state={state} reload={reload} />
-                <CertificatesCard state={state} profiles={profiles} settings={settings} version={version} reload={reload} />
-                <CredentialsCard state={state} profiles={profiles} reload={reload} />
+                <CockpitCertCard state={full} reload={reload} />
+                <CertificatesCard state={full} profiles={profiles} settings={settings} version={version} reload={reload} />
+                <CredentialsCard state={full} profiles={profiles} reload={reload} />
             </Stack>
         </PageSection>
     );
@@ -223,7 +232,13 @@ const RenewalTimerAlert = ({ timer, reload }: { timer: TimerState | null, reload
 
 /* Installs the certbot plugin of a provider if it is missing. Resolves to
  * true when the plugin is available afterwards. */
-async function ensurePlugin(Dialogs: DialogsType, provider: Provider, installed: PluginInfo[]): Promise<boolean> {
+/* The installed DNS plugins, asking certbot if the page doesn't know them yet */
+async function installedPlugins(known: PluginInfo[] | null): Promise<PluginInfo[]> {
+    return known ?? dnsPlugins(await backend.listPlugins().catch(() => []));
+}
+
+async function ensurePlugin(Dialogs: DialogsType, provider: Provider, known: PluginInfo[] | null): Promise<boolean> {
+    const installed = await installedPlugins(known);
     if (installed.some(i => i.name === provider.plugin))
         return true;
     const name = provider.package ?? provider.pip ?? provider.plugin;
@@ -236,7 +251,8 @@ async function ensurePlugin(Dialogs: DialogsType, provider: Provider, installed:
 }
 
 async function addCredentials(Dialogs: DialogsType, profiles: CredentialsProfile[],
-    installed: PluginInfo[], reload: () => void, profile: CredentialsProfile | null = null) {
+    known: PluginInfo[] | null, reload: () => void, profile: CredentialsProfile | null = null) {
+    const installed = await installedPlugins(known);
     const saved = await Dialogs.run(CredentialsDialog, { profile, profiles, installed });
     if (saved) {
         await ensurePlugin(Dialogs, findProvider(saved.plugin), installed);
@@ -263,11 +279,11 @@ const CertificatesCard = ({ state, profiles, settings, version, reload }: {
     state: State,
     profiles: CredentialsProfile[],
     settings: Settings,
-    version: string,
+    version: string | null,
     reload: () => void,
 }) => {
     const Dialogs = useDialogs();
-    const installed = dnsPlugins(state.plugins);
+    const installed = state.plugins && dnsPlugins(state.plugins);
     const cockpitName = state.cockpitCert?.selected;
 
     const run = async (title: string, args: string[], successText?: string) => {
@@ -276,18 +292,19 @@ const CertificatesCard = ({ state, profiles, settings, version, reload }: {
     };
 
     const request = async () => {
+        const plugins = await installedPlugins(installed);
         const result = await Dialogs.run(RequestDialog, {
             profiles,
-            installed,
+            installed: plugins,
             existingNames: state.certificates.map(c => c.name),
             defaultEmail: settings.email ?? "",
         });
         if (result === "add-credentials")
-            return addCredentials(Dialogs, profiles, installed, reload);
+            return addCredentials(Dialogs, profiles, plugins, reload);
         if (!result)
             return;
         const challenge = result.request.challenge;
-        if (challenge.type === "dns" && !await ensurePlugin(Dialogs, challenge.provider, installed)) {
+        if (challenge.type === "dns" && !await ensurePlugin(Dialogs, challenge.provider, plugins)) {
             reload();
             return;
         }
@@ -396,7 +413,7 @@ const CertificatesCard = ({ state, profiles, settings, version, reload }: {
                     <RenewalTimerAlert timer={state.timer} reload={reload} />
                     <ListingTable aria-label={_("Certificates")} variant="compact"
                                   emptyCaption={_("No certificates yet")}
-                                  emptyCaptionDetail={cockpit.format(_("certbot $0"), version)}
+                                  emptyCaptionDetail={version ? cockpit.format(_("certbot $0"), version) : undefined}
                                   columns={[_("Name"), _("Domains"), _("Validation"), _("Expires"), _("Status"), { title: "", props: { screenReaderText: _("Actions") } }]}
                                   rows={rows} />
                 </Stack>
@@ -524,7 +541,7 @@ const CredentialsCard = ({ state, profiles, reload }: {
     reload: () => void,
 }) => {
     const Dialogs = useDialogs();
-    const installed = dnsPlugins(state.plugins);
+    const installed = state.plugins && dnsPlugins(state.plugins);
 
     /* which lineages use a profile, from the renewal configuration */
     const usedBy = (p: CredentialsProfile) => Object.entries(state.renewal)
@@ -554,7 +571,7 @@ const CredentialsCard = ({ state, profiles, reload }: {
 
     const rows = profiles.map(p => {
         const users = usedBy(p);
-        const pluginOk = installed.some(i => i.name === p.plugin);
+        const pluginOk = !installed || installed.some(i => i.name === p.plugin);
         const actions = [
             <DropdownItem key="edit" onClick={() => addCredentials(Dialogs, profiles, installed, reload, p)}>
                 {_("Edit")}

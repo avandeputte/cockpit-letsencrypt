@@ -9,7 +9,7 @@ Rules-Requires-Root: no
 
 Package: cockpit-letsencrypt
 Architecture: all
-Depends: ${misc:Depends}, cockpit-bridge, certbot
+Depends: ${misc:Depends}, cockpit-bridge, certbot, openssl
 Recommends: cockpit-ws, cockpit-packagekit
 Suggests: python3-certbot-dns-cloudflare, python3-certbot-dns-rfc2136
 Description: Cockpit module to manage Let's Encrypt certificates
